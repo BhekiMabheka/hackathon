@@ -1,11 +1,22 @@
 """
-Feature engineering — banking-domain temporal and aggregate features.
+Feature engineering — credit risk domain features for loan default prediction.
 
-Design principles:
-  - All features are computed in a single pass per entity (customer/account).
-  - Lag features use strict date ordering to avoid look-ahead.
-  - Features are namespaced (e.g., txn_30d_mean) for interpretability.
-  - Fit only on training window; test features use the same lookback periods.
+This dataset is cross-sectional (no date column), so all features are
+derived from the static loan application snapshot.
+
+Feature groups:
+  1. Credit utilisation         — balance vs. total credit limit
+  2. Affordability ratios       — loan_amount vs. income, installment vs. income
+  3. Risk grade features        — grade_letter / grade_num interactions
+  4. Delinquency aggregates     — combining delinquency_history + num_of_delinquencies
+  5. Loan structure             — interaction of loan_term × interest_rate
+  6. Income / leverage          — log transforms, income bands
+  7. Compound risk flags        — binary indicators from domain knowledge
+
+Design rules:
+  - No fit state needed for ratio/interaction features (safe for train+test).
+  - New feature names are prefixed with 'feat_' for easy identification.
+  - Called AFTER preprocessing so grade_letter/grade_num already exist.
 
 Run standalone: python -m src.features.engineering
 """
@@ -14,7 +25,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -23,170 +33,185 @@ from src.utils.logging import get_logger
 
 log = get_logger(__name__)
 
+EPS = 1e-6  # division guard
+
+
 # ---------------------------------------------------------------------------
-# Rolling / lag feature builders
+# 1. Credit utilisation
 # ---------------------------------------------------------------------------
 
-
-def add_rolling_features(
-    df: pd.DataFrame,
-    group_col: str,
-    date_col: str,
-    value_cols: list[str],
-    windows: list[int],
-    agg_fns: list[str] = ("mean", "std", "min", "max", "sum"),
-) -> pd.DataFrame:
-    """
-    Add rolling window aggregate features per entity.
-
-    Parameters
-    ----------
-    df:         DataFrame sorted by (group_col, date_col).
-    group_col:  Grouping key (e.g., customer_id).
-    date_col:   Date column for ordering.
-    value_cols: Numeric columns to aggregate.
-    windows:    List of lookback windows in days.
-    agg_fns:    Aggregation functions to apply.
-
-    Notes
-    -----
-    Uses pandas rolling with min_periods=1 so rows with fewer observations
-    than the window still get a value (avoid NaN explosion in early history).
-    """
-    df = df.sort_values([group_col, date_col]).reset_index(drop=True)
-
-    for col in value_cols:
-        if col not in df.columns:
-            log.warning("Value column not found, skipping", col=col)
-            continue
-        for window in windows:
-            grp = df.groupby(group_col)[col]
-            for fn in agg_fns:
-                feat_name = f"{col}_{window}d_{fn}"
-                if fn == "std":
-                    df[feat_name] = grp.transform(
-                        lambda s, w=window: s.rolling(w, min_periods=1).std().fillna(0)
-                    )
-                else:
-                    df[feat_name] = grp.transform(
-                        lambda s, w=window, f=fn: s.rolling(w, min_periods=1).agg(f)
-                    )
-
-    log.info(
-        "Added rolling features",
-        cols=value_cols,
-        windows=windows,
-        total_new_features=len(value_cols) * len(windows) * len(agg_fns),
-    )
+def add_credit_utilisation(df: pd.DataFrame) -> pd.DataFrame:
+    """current_balance / total_credit_limit — core credit bureau metric."""
+    if "current_balance" in df.columns and "total_credit_limit" in df.columns:
+        df["feat_credit_util"] = df["current_balance"] / (df["total_credit_limit"] + EPS)
+        df["feat_credit_util_capped"] = df["feat_credit_util"].clip(0, 1)
+        df["feat_high_util_flag"] = (df["feat_credit_util"] > 0.8).astype(int)
     return df
 
 
-def add_lag_features(
-    df: pd.DataFrame,
-    group_col: str,
-    date_col: str,
-    value_cols: list[str],
-    lags: list[int],
-) -> pd.DataFrame:
-    """
-    Add point-in-time lag features (value N rows back within the group).
+# ---------------------------------------------------------------------------
+# 2. Affordability ratios
+# ---------------------------------------------------------------------------
 
-    Note: 'rows back' is only a proxy for 'N days back' if data is daily.
-    For irregular time series, prefer rolling window features instead.
+def add_affordability_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    df = df.sort_values([group_col, date_col]).reset_index(drop=True)
-    for col in value_cols:
-        if col not in df.columns:
-            continue
-        for lag in lags:
-            feat_name = f"{col}_lag{lag}"
-            df[feat_name] = df.groupby(group_col)[col].shift(lag)
+    Loan amount and repayment burden relative to income.
 
-    log.info("Added lag features", cols=value_cols, lags=lags)
+    installment may be absent (controlled by params.yaml:features.drop_leaky).
+    A first-principles approximation is computed regardless.
+    """
+    if "loan_amount" in df.columns and "annual_income" in df.columns:
+        df["feat_loan_to_income"] = df["loan_amount"] / (df["annual_income"] + EPS)
+
+    if "installment" in df.columns and "annual_income" in df.columns:
+        monthly_income = df["annual_income"] / 12
+        df["feat_installment_to_monthly"] = df["installment"] / (monthly_income + EPS)
+
+    if "loan_amount" in df.columns and "annual_income" in df.columns and "loan_term" in df.columns:
+        # Simple monthly repayment approximation (no interest) — leakage-free alternative
+        monthly_income_approx = df["annual_income"] / 12
+        simple_monthly_payment = df["loan_amount"] / (df["loan_term"] + EPS)
+        df["feat_simple_payment_to_income"] = simple_monthly_payment / (monthly_income_approx + EPS)
+
+    if "debt_to_income_ratio" in df.columns:
+        df["feat_dti_band"] = pd.cut(
+            df["debt_to_income_ratio"],
+            bins=[0, 0.1, 0.2, 0.35, 0.5, np.inf],
+            labels=[0, 1, 2, 3, 4],
+            right=False,
+        ).astype(float)
+        df["feat_high_dti_flag"] = (df["debt_to_income_ratio"] > 0.35).astype(int)
+
     return df
 
 
-def add_temporal_features(df: pd.DataFrame, date_col: str) -> pd.DataFrame:
-    """
-    Extract calendar features from a datetime column.
+# ---------------------------------------------------------------------------
+# 3. Risk grade features
+# ---------------------------------------------------------------------------
 
-    Banking patterns often follow calendar cycles:
-    month-end spikes, salary day inflows, year-end bonuses.
+def add_grade_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    if date_col not in df.columns:
-        log.warning("Date column not found", col=date_col)
+    Interactions between grade_letter, grade_num, and interest_rate.
+    grade_letter is ordinal 0=A (safest) … 6=G (riskiest) — set in preprocessing.
+    """
+    if "grade_letter" not in df.columns:
         return df
 
-    dt = df[date_col]
-    df["dow"] = dt.dt.dayofweek                    # 0=Mon..6=Sun
-    df["dom"] = dt.dt.day                          # day of month
-    df["month"] = dt.dt.month
-    df["quarter"] = dt.dt.quarter
-    df["is_month_end"] = dt.dt.is_month_end.astype(int)
-    df["is_month_start"] = dt.dt.is_month_start.astype(int)
-    df["is_weekend"] = (dt.dt.dayofweek >= 5).astype(int)
-    df["week_of_year"] = dt.dt.isocalendar().week.astype(int)
+    if "interest_rate" in df.columns:
+        grade_avg_rate = df.groupby("grade_letter")["interest_rate"].transform("mean")
+        df["feat_rate_vs_grade_avg"] = df["interest_rate"] - grade_avg_rate
 
-    # SA salary cycle proxy: last 3 days of month are typically high-activity
-    df["is_salary_window"] = (dt.dt.day >= 25).astype(int)
+    if "grade_num" in df.columns:
+        df["feat_grade_position"] = df["grade_letter"] * 5 + df["grade_num"]
 
-    log.info("Added temporal features", date_col=date_col)
-    return df
-
-
-def add_ratio_features(
-    df: pd.DataFrame,
-    numerator_cols: list[str],
-    denominator_cols: list[str],
-    eps: float = 1e-6,
-) -> pd.DataFrame:
-    """
-    Add ratio features (e.g., credit/debit ratio, balance/limit).
-
-    Division-by-zero is handled with eps.
-    """
-    for num, denom in zip(numerator_cols, denominator_cols):
-        if num in df.columns and denom in df.columns:
-            feat_name = f"ratio_{num}_over_{denom}"
-            df[feat_name] = df[num] / (df[denom].abs() + eps)
-
-    return df
-
-
-def add_velocity_features(
-    df: pd.DataFrame,
-    group_col: str,
-    date_col: str,
-    amount_col: str,
-    windows: list[int] = (7, 30),
-) -> pd.DataFrame:
-    """
-    Transaction velocity features — count and volume per window.
-    Critical for fraud / AML risk scoring.
-    """
-    df = df.sort_values([group_col, date_col]).reset_index(drop=True)
-    grp = df.groupby(group_col)[amount_col]
-    for w in windows:
-        df[f"txn_count_{w}d"] = grp.transform(
-            lambda s, ww=w: s.rolling(ww, min_periods=1).count()
-        )
-        df[f"txn_volume_{w}d"] = grp.transform(
-            lambda s, ww=w: s.rolling(ww, min_periods=1).sum()
-        )
-        df[f"txn_avg_{w}d"] = df[f"txn_volume_{w}d"] / (df[f"txn_count_{w}d"] + 1e-6)
-
-    log.info("Added velocity features", amount_col=amount_col, windows=list(windows))
     return df
 
 
 # ---------------------------------------------------------------------------
-# Main feature pipeline
+# 4. Delinquency aggregates
 # ---------------------------------------------------------------------------
 
+def add_delinquency_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Combine and normalise delinquency signals."""
+    if "delinquency_history" in df.columns and "num_of_delinquencies" in df.columns:
+        df["feat_total_delinquency"] = (
+            df["delinquency_history"] + df["num_of_delinquencies"]
+        )
+        df["feat_any_delinquency"] = (df["feat_total_delinquency"] > 0).astype(int)
+        df["feat_severe_delinquency"] = (df["feat_total_delinquency"] >= 3).astype(int)
+
+        if "num_of_open_accounts" in df.columns:
+            df["feat_delinq_per_account"] = df["feat_total_delinquency"] / (
+                df["num_of_open_accounts"] + 1
+            )
+
+    if "public_records" in df.columns:
+        df["feat_has_public_record"] = (df["public_records"] > 0).astype(int)
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# 5. Loan structure features
+# ---------------------------------------------------------------------------
+
+def add_loan_structure_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Interaction features between loan amount, term, and interest rate."""
+    if "interest_rate" in df.columns and "loan_term" in df.columns:
+        df["feat_total_interest_burden"] = (
+            df["interest_rate"] / 100 * df["loan_term"] / 12
+        )
+        df["feat_long_high_rate"] = (
+            (df["loan_term"] >= 60) & (df["interest_rate"] > 15)
+        ).astype(int)
+
+    if "loan_amount" in df.columns and "loan_term" in df.columns:
+        df["feat_loan_per_term_month"] = df["loan_amount"] / (df["loan_term"] + EPS)
+
+    if "credit_score" in df.columns:
+        df["feat_credit_band"] = pd.cut(
+            df["credit_score"],
+            bins=[0, 580, 670, 740, 800, np.inf],
+            labels=[0, 1, 2, 3, 4],
+            right=False,
+        ).astype(float)
+        df["feat_subprime"] = (df["credit_score"] < 620).astype(int)
+        df["feat_prime"] = (df["credit_score"] >= 740).astype(int)
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# 6. Income & leverage features
+# ---------------------------------------------------------------------------
+
+def add_income_features(df: pd.DataFrame) -> pd.DataFrame:
+    if "annual_income" in df.columns:
+        df["feat_log_income"] = np.log1p(df["annual_income"])
+        df["feat_income_band"] = pd.cut(
+            df["annual_income"],
+            bins=[0, 20_000, 40_000, 70_000, 120_000, np.inf],
+            labels=[0, 1, 2, 3, 4],
+            right=False,
+        ).astype(float)
+
+    if "current_balance" in df.columns:
+        df["feat_log_balance"] = np.log1p(df["current_balance"].clip(0))
+
+    if "loan_amount" in df.columns:
+        df["feat_log_loan_amount"] = np.log1p(df["loan_amount"])
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# 7. Compound risk flags
+# ---------------------------------------------------------------------------
+
+def add_risk_flags(df: pd.DataFrame) -> pd.DataFrame:
+    """Binary domain-knowledge flags capturing compound risk scenarios."""
+    if "debt_to_income_ratio" in df.columns and "feat_any_delinquency" in df.columns:
+        df["feat_dti_x_delinquency"] = (
+            df["debt_to_income_ratio"] * df["feat_any_delinquency"]
+        )
+
+    if "credit_score" in df.columns and "grade_letter" in df.columns:
+        df["feat_score_x_grade"] = df["credit_score"] * df["grade_letter"]
+        # Flag mismatches: low score but good grade (or vice versa)
+        score_norm = df["credit_score"] / 850
+        grade_norm = df["grade_letter"] / 6
+        df["feat_score_grade_mismatch"] = (score_norm - (1 - grade_norm)).abs()
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Main FeatureEngineer class
+# ---------------------------------------------------------------------------
 
 class FeatureEngineer:
     """
-    Orchestrates all feature creation steps.
+    Orchestrates all credit-risk feature creation steps.
 
     Usage
     -----
@@ -204,20 +229,17 @@ class FeatureEngineer:
     def fit_transform(self, df: pd.DataFrame) -> pd.DataFrame:
         log.info("Starting feature engineering", rows=len(df))
         df = self._build_features(df)
-        self.feature_cols = [
-            c for c in df.columns
-            if c not in (
-                self.config.get("id_col"),
-                self.config.get("target_col"),
-                self.config.get("date_col"),
-            )
-        ]
+        protected = {
+            self.config.get("id_col"),
+            self.config.get("target_col"),
+            self.config.get("date_col"),
+        } - {None}
+        self.feature_cols = [c for c in df.columns if c not in protected]
         self._meta = {"feature_cols": self.feature_cols, "config": self.config}
         log.info("Feature engineering complete", n_features=len(self.feature_cols))
         return df
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply same transforms to test. No fit state needed for most features."""
         return self._build_features(df)
 
     def save_meta(self, path: str | Path) -> None:
@@ -227,41 +249,13 @@ class FeatureEngineer:
         log.info("Saved feature meta", path=str(path), n_features=len(self.feature_cols))
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        cfg = self.config
-        date_col = cfg.get("date_col")
-        id_col = cfg.get("id_col")
-        amount_col = cfg.get("amount_col")  # may be None until brief
-
-        # Calendar features
-        if date_col and date_col in df.columns:
-            df = add_temporal_features(df, date_col)
-
-        # Rolling aggregates over numeric cols (excluding id/target/date)
-        skip = {id_col, cfg.get("target_col"), date_col}
-        numeric_cols = [
-            c for c in df.select_dtypes(include="number").columns
-            if c not in skip
-        ]
-
-        windows = cfg.get("lag_windows", [7, 14, 30, 90])
-        agg_fns = cfg.get("rolling_agg_fns", ["mean", "std", "sum"])
-
-        if id_col and date_col and numeric_cols:
-            # Limit to most important numeric cols to avoid feature explosion
-            top_cols = numeric_cols[:10]
-            df = add_rolling_features(
-                df,
-                group_col=id_col,
-                date_col=date_col,
-                value_cols=top_cols,
-                windows=windows,
-                agg_fns=agg_fns,
-            )
-
-        # Velocity (if amount column available)
-        if amount_col and amount_col in df.columns and id_col and date_col:
-            df = add_velocity_features(df, id_col, date_col, amount_col, windows=[7, 30])
-
+        df = add_credit_utilisation(df)
+        df = add_affordability_features(df)
+        df = add_grade_features(df)
+        df = add_delinquency_features(df)
+        df = add_loan_structure_features(df)
+        df = add_income_features(df)
+        df = add_risk_flags(df)
         return df
 
 
@@ -274,12 +268,10 @@ if __name__ == "__main__":
         params = yaml.safe_load(f)
 
     train = pd.read_parquet("data/interim/train.parquet")
-    test = pd.read_parquet("data/interim/test.parquet")
+    holdout_path = Path("data/interim/holdout.parquet")
+    test = pd.read_parquet(holdout_path) if holdout_path.exists() else pd.read_parquet("data/interim/val.parquet")
 
-    fe_config = {
-        **params["data"],
-        **params["features"],
-    }
+    fe_config = {**params["data"], **params["features"]}
     fe = FeatureEngineer(config=fe_config)
     train_out = fe.fit_transform(train)
     test_out = fe.transform(test)

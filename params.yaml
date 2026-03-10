@@ -1,45 +1,52 @@
 # DVC parameter file — all tunable values that DVC tracks for pipeline invalidation.
-# Edit here; DVC will detect changes and re-run affected stages.
+# Confirmed against loan_dataset_20000.csv
 
 data:
   raw_path: data/raw
   processed_path: data/processed
   interim_path: data/interim
+  train_file: loan_dataset_20000.csv   # single file — split internally
+  test_file: null                      # set if a separate held-out test file is released
   test_size: 0.2
   val_size: 0.1
   random_state: 42
-  date_col: transaction_date        # update once brief is released
-  target_col: target                # update once brief is released
-  id_col: customer_id               # update once brief is released
+  date_col: null                       # no date column — cross-sectional dataset
+  target_col: loan_paid_back
+  id_col: loan_id                      # synthetic ID added during ingestion
 
 features:
-  lag_windows: [7, 14, 30, 90]      # rolling window sizes (days)
-  rolling_agg_fns: ["mean", "std", "min", "max", "sum"]
-  cat_encoding: "target"            # options: target, ordinal, onehot
-  drop_high_null_thresh: 0.8        # drop features with > 80% nulls
+  # Credit-risk domain features (see src/features/engineering.py)
+  drop_redundant: true                 # drop monthly_income (= annual_income/12)
+  drop_leaky: false                    # set true to drop installment (derived column)
+  parse_grade_subgrade: true           # split "B5" → grade_letter="B", grade_num=5
+  cat_encoding: ordinal                # ordinal | onehot
+  drop_high_null_thresh: 0.8
 
 training:
-  cv_strategy: "stratified_time"    # stratified_time | stratified_kfold | time_series
+  cv_strategy: stratified_kfold       # no date col → no temporal split
   n_folds: 5
-  metric: "roc_auc"                 # primary metric for leaderboard
-  secondary_metrics: ["pr_auc", "f1", "gini"]
-  debug: false                      # if true: subsample data for fast iteration
-  debug_nrows: 5000
+  metric: roc_auc
+  secondary_metrics: [pr_auc, f1_macro, gini]
+  debug: false
+  debug_nrows: 2000
 
 model:
-  type: "lgbm"                      # lgbm | xgb | ensemble
+  type: lgbm
   lgbm:
     n_estimators: 2000
     learning_rate: 0.03
-    num_leaves: 127
-    min_child_samples: 50
+    num_leaves: 63
+    max_depth: -1
+    min_child_samples: 30
     subsample: 0.8
+    subsample_freq: 1
     colsample_bytree: 0.8
     reg_alpha: 0.1
     reg_lambda: 1.0
-    class_weight: "balanced"
+    class_weight: balanced           # dataset may be imbalanced
     early_stopping_rounds: 100
     verbose: -1
+    eval_metric: auc
   xgb:
     n_estimators: 2000
     learning_rate: 0.03
@@ -49,15 +56,16 @@ model:
     colsample_bytree: 0.8
     reg_alpha: 0.1
     reg_lambda: 1.0
-    scale_pos_weight: 1             # set to neg/pos ratio for imbalance
+    scale_pos_weight: 1
     early_stopping_rounds: 100
+    tree_method: hist
 
 optuna:
   n_trials: 50
   timeout: 3600
-  direction: "maximize"
+  direction: maximize
 
 submission:
   output_dir: outputs/submissions
-  id_col: customer_id
+  id_col: loan_id
   pred_col: score

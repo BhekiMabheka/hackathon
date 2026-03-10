@@ -6,6 +6,11 @@ Responsibilities:
   - Apply basic type coercions from data dictionary
   - Emit a structured log entry with row/column counts + null summary
   - Never mutate business logic here (that belongs in preprocessing.py)
+
+Loan dataset specifics (loan_dataset_20000.csv):
+  - Single file — no separate train/test; splitting is done in preprocessing.
+  - No date column — cross-sectional data.
+  - No natural ID column — a synthetic `loan_id` is injected on load.
 """
 
 from __future__ import annotations
@@ -20,6 +25,8 @@ from src.utils.logging import get_logger
 from src.utils.io import read_parquet_or_csv
 
 log = get_logger(__name__)
+
+SYNTHETIC_ID_COL = "loan_id"
 
 
 def load_raw(
@@ -36,41 +43,67 @@ def load_raw(
     ----------
     raw_dir:   Directory containing raw data files.
     filename:  File name (csv, parquet, or xlsx).
-    date_col:  If provided, parse this column as datetime.
-    id_col:    If provided, ensure this column is string type.
+    date_col:  If provided, parse this column as datetime. None for this dataset.
+    id_col:    Expected ID column name. If absent in data, a synthetic one is created.
     nrows:     Optional row limit for debug runs.
 
     Returns
     -------
-    pd.DataFrame with at least the id and date columns correctly typed.
+    pd.DataFrame guaranteed to have an id_col of type str.
     """
     path = Path(raw_dir) / filename
     log.info("Loading raw data", path=str(path), nrows=nrows)
 
     df = read_parquet_or_csv(path, nrows=nrows)
 
+    # Inject synthetic ID if column not present in raw data
+    target_id = id_col or SYNTHETIC_ID_COL
+    if target_id not in df.columns:
+        df.insert(0, target_id, [f"L{i:06d}" for i in range(len(df))])
+        log.info("Injected synthetic ID column", col=target_id, rows=len(df))
+    else:
+        df[target_id] = df[target_id].astype(str)
+
     if date_col and date_col in df.columns:
         df[date_col] = pd.to_datetime(df[date_col], infer_datetime_format=True)
         log.info("Parsed date column", col=date_col, dtype=str(df[date_col].dtype))
-
-    if id_col and id_col in df.columns:
-        df[id_col] = df[id_col].astype(str)
 
     _log_shape(df, label=filename)
     return df
 
 
+def load_single_file(
+    raw_dir: str | Path,
+    filename: str,
+    id_col: str = SYNTHETIC_ID_COL,
+    nrows: Optional[int] = None,
+) -> pd.DataFrame:
+    """
+    Load the loan dataset from a single file (no separate train/test files).
+    Train/test splitting is handled downstream in preprocessing / splits.
+    """
+    return load_raw(raw_dir, filename, date_col=None, id_col=id_col, nrows=nrows)
+
+
 def load_train_test(
     raw_dir: str | Path,
-    train_file: str = "train.csv",
-    test_file: str = "test.csv",
+    train_file: str = "loan_dataset_20000.csv",
+    test_file: Optional[str] = None,
     date_col: Optional[str] = None,
-    id_col: Optional[str] = None,
+    id_col: str = SYNTHETIC_ID_COL,
     nrows: Optional[int] = None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Convenience wrapper to load both train and test splits."""
+) -> tuple[pd.DataFrame, Optional[pd.DataFrame]]:
+    """
+    Load train (and optionally test) data.
+
+    For the loan dataset: pass test_file=None to signal a single-file scenario.
+    A separate held-out test file may be released by the competition organisers;
+    when it is, set test_file to its filename.
+    """
     train = load_raw(raw_dir, train_file, date_col=date_col, id_col=id_col, nrows=nrows)
-    test = load_raw(raw_dir, test_file, date_col=date_col, id_col=id_col, nrows=nrows)
+    test = None
+    if test_file:
+        test = load_raw(raw_dir, test_file, date_col=date_col, id_col=id_col, nrows=nrows)
     return train, test
 
 

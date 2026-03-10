@@ -1,6 +1,7 @@
 stages:
 
   # ── Stage 1: Raw data validation ─────────────────────────────────────────
+  # Cross-sectional dataset: no date leakage check, single file.
   validate_raw:
     cmd: python -m src.data.validation --stage raw
     deps:
@@ -9,27 +10,31 @@ stages:
     params:
       - params.yaml:
           - data.raw_path
-          - data.date_col
           - data.target_col
           - data.id_col
     outs:
       - outputs/reports/raw_validation_report.json
 
   # ── Stage 2: Preprocessing ───────────────────────────────────────────────
+  # Splits full file into train/val/holdout, then fits preprocessor on train.
   preprocess:
     cmd: python -m src.data.preprocessing
     deps:
       - src/data/preprocessing.py
       - src/data/splits.py
+      - src/data/ingestion.py
       - data/raw
       - outputs/reports/raw_validation_report.json
     params:
       - params.yaml:
           - data
           - features.drop_high_null_thresh
+          - features.drop_redundant
+          - features.drop_leaky
     outs:
       - data/interim/train.parquet
-      - data/interim/test.parquet
+      - data/interim/val.parquet
+      - data/interim/holdout.parquet
       - data/interim/preprocessing_meta.json
 
   # ── Stage 3: Feature engineering ─────────────────────────────────────────
@@ -39,13 +44,13 @@ stages:
       - src/features/engineering.py
       - src/features/selection.py
       - data/interim/train.parquet
-      - data/interim/test.parquet
+      - data/interim/holdout.parquet
       - data/interim/preprocessing_meta.json
     params:
       - params.yaml:
           - features
-          - data.date_col
           - data.id_col
+          - data.target_col
     outs:
       - data/processed/train_features.parquet
       - data/processed/test_features.parquet
@@ -71,6 +76,7 @@ stages:
           cache: false
 
   # ── Stage 5: Inference / submission ───────────────────────────────────────
+  # Runs on holdout (or competition test file when released).
   predict:
     cmd: python scripts/predict.py
     deps:

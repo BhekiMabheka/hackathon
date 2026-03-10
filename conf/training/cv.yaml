@@ -1,5 +1,5 @@
 # @package _global_.training
-cv_strategy: stratified_time  # stratified_time | stratified_kfold | time_series
+cv_strategy: stratified_kfold  # cross-sectional dataset — no date col, no temporal split
 n_folds: 5
 metric: roc_auc
 secondary_metrics:
@@ -12,7 +12,7 @@ early_stopping_rounds: 100
 
 # Debug mode: fast local run with a data subset
 debug: false
-debug_nrows: 5000
+debug_nrows: 2000
 
 # Optuna HPO
 hpo:
