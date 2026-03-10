@@ -228,7 +228,7 @@ class FeatureEngineer:
 
     def fit_transform(self, df: pd.DataFrame) -> pd.DataFrame:
         log.info("Starting feature engineering", rows=len(df))
-        df = self._build_features(df)
+        df = self._build_features(df.copy())
         protected = {
             self.config.get("id_col"),
             self.config.get("target_col"),
@@ -240,7 +240,7 @@ class FeatureEngineer:
         return df
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        return self._build_features(df)
+        return self._build_features(df.copy())
 
     def save_meta(self, path: str | Path) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)

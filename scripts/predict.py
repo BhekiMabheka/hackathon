@@ -56,10 +56,9 @@ def main(cfg: DictConfig) -> None:
     # ── Run inference ─────────────────────────────────────────────────
     inference = InferencePipeline(model_path="outputs/models/model.pkl").load()
 
-    import json
-    with open("data/processed/feature_meta.json") as f:
-        meta = json.load(f)
-    feature_cols = meta["feature_cols"]
+    # Use the feature list from the model itself — it records exactly what
+    # columns it was trained on, after feature selection.
+    feature_cols = inference.model_feature_cols
 
     scores = inference.predict(test, feature_cols=feature_cols)
 

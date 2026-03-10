@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "nedbank-mlops"
@@ -62,6 +62,7 @@ dev = [
     "seaborn>=0.13",
     "plotly>=5.20",
     "shap>=0.45",
+    "streamlit>=1.35",
 ]
 
 [tool.setuptools.packages.find]

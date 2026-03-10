@@ -4,6 +4,7 @@
 raw_path: data/raw
 processed_path: data/processed
 interim_path: data/interim
+train_file: loan_dataset_20000.csv
 
 # Column roles
 id_col: loan_id           # synthetic — generated from row index during ingestion

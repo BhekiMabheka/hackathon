@@ -1,0 +1,34 @@
+{
+  "run_date": "2026-03-10T10:11:13.849339",
+  "dataset": "loan_dataset",
+  "checks": [
+    {
+      "name": "not_empty",
+      "passed": true,
+      "metric": 20000,
+      "threshold": 1,
+      "details": ""
+    },
+    {
+      "name": "no_duplicate_ids",
+      "passed": "True",
+      "metric": 0,
+      "threshold": 0,
+      "details": ""
+    },
+    {
+      "name": "null_budget",
+      "passed": true,
+      "metric": 0.0,
+      "threshold": 0.3,
+      "details": ""
+    },
+    {
+      "name": "statistical_anomalies",
+      "passed": true,
+      "metric": 0,
+      "threshold": 5.0,
+      "details": ""
+    }
+  ]
+}

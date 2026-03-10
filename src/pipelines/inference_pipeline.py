@@ -27,6 +27,13 @@ class InferencePipeline:
         self._model = BaseModel.load(self.model_path)
         return self
 
+    @property
+    def model_feature_cols(self) -> list[str]:
+        """Feature list the model was trained on — authoritative source of truth."""
+        if self._model is None:
+            raise RuntimeError("Call .load() first.")
+        return self._model.feature_cols
+
     def predict(self, test_df: pd.DataFrame, feature_cols: list[str]) -> pd.Series:
         if self._model is None:
             raise RuntimeError("Call .load() first.")

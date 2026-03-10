@@ -1,4 +1,4 @@
-.PHONY: help install install-dev lint test train predict submit dvc-repro clean setup-mlflow
+.PHONY: help install install-dev lint test train predict submit dvc-repro clean setup-mlflow dashboard
 
 PYTHON := python
 PIP    := pip
@@ -72,6 +72,9 @@ de-backfill:  ## Run backfill pipeline for a date range
 # ---------------------------------------------------------------------------
 # MLflow
 # ---------------------------------------------------------------------------
+dashboard:  ## Launch Streamlit demo dashboard
+	streamlit run dashboard/app.py --server.port 8501
+
 setup-mlflow:  ## Start local MLflow tracking server
 	mlflow server \
 		--backend-store-uri sqlite:///outputs/mlflow.db \

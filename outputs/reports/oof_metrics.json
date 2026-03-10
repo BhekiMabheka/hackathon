@@ -1,0 +1,11 @@
+{
+  "oof_roc_auc": 0.880011,
+  "oof_pr_auc": 0.961541,
+  "oof_gini": 0.760022,
+  "oof_ks": 0.571833,
+  "oof_f1_at_05": 0.940625,
+  "oof_capture_top10pct": 0.124754,
+  "oof_capture_top20pct": 0.247455,
+  "oof_ece": 0.033272,
+  "oof_pos_rate": 0.799857
+}

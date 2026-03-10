@@ -19,6 +19,13 @@ paths:
   submissions: outputs/submissions
   reports: outputs/reports
 
+features:
+  drop_redundant: true       # drop monthly_income (= annual_income/12)
+  drop_leaky: false          # keep installment by default; set true to drop
+  parse_grade_subgrade: true # parse "B5" → grade_letter=1, grade_num=5
+  cat_encoding: ordinal      # ordinal | onehot
+  drop_high_null_thresh: 0.8 # drop columns with null ratio above this
+
 mlflow:
   tracking_uri: ${oc.env:MLFLOW_TRACKING_URI,sqlite:///outputs/mlflow.db}
   experiment_name: ${oc.env:MLFLOW_EXPERIMENT_NAME,nedbank-masters-2026}
