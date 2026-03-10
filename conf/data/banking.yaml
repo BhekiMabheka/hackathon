@@ -1,0 +1,27 @@
+# @package _global_.data
+# Placeholder values — update once the competition brief is released (25 March 2026).
+
+raw_path: data/raw
+processed_path: data/processed
+interim_path: data/interim
+
+# Column roles — to be confirmed from data dictionary
+id_col: customer_id
+date_col: transaction_date
+target_col: target
+
+# Data shape expectations (update after EDA)
+expected_train_rows: null     # e.g., 500000
+expected_test_rows: null
+expected_n_features: null
+
+# Split config
+test_size: 0.20
+val_size: 0.10
+random_state: 42
+stratify: true
+
+# Quality thresholds
+max_null_ratio: 0.80          # features above this are dropped
+max_cardinality: 500          # max unique values for categorical encoding
+min_class_samples: 100        # minimum samples per target class

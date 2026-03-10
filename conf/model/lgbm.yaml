@@ -1,0 +1,21 @@
+# @package _global_.model
+type: lgbm
+
+lgbm:
+  n_estimators: 2000
+  learning_rate: 0.03
+  num_leaves: 127
+  max_depth: -1
+  min_child_samples: 50
+  min_child_weight: 0.001
+  subsample: 0.8
+  subsample_freq: 1
+  colsample_bytree: 0.8
+  reg_alpha: 0.1
+  reg_lambda: 1.0
+  class_weight: balanced
+  n_jobs: -1
+  random_state: 42
+  verbose: -1
+  early_stopping_rounds: 100
+  eval_metric: auc

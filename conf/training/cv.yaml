@@ -1,0 +1,31 @@
+# @package _global_.training
+cv_strategy: stratified_time  # stratified_time | stratified_kfold | time_series
+n_folds: 5
+metric: roc_auc
+secondary_metrics:
+  - pr_auc
+  - f1_macro
+  - gini
+
+# Early-stopping patience (in CV, applied per fold)
+early_stopping_rounds: 100
+
+# Debug mode: fast local run with a data subset
+debug: false
+debug_nrows: 5000
+
+# Optuna HPO
+hpo:
+  enabled: false
+  n_trials: 50
+  timeout: 3600        # seconds
+  direction: maximize
+
+# Imbalance handling
+imbalance:
+  strategy: class_weight  # class_weight | smote | none
+  sampling_ratio: 1.0
+
+# Calibration (for well-calibrated probabilities)
+calibrate: false
+calibration_method: isotonic  # isotonic | sigmoid

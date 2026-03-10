@@ -1,3 +1,43 @@
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# ── Data (DVC-tracked — never commit raw/processed data to git) ───────────────
+data/raw/
+data/interim/
+data/processed/
+data/external/
+
+# ── Model artefacts ───────────────────────────────────────────────────────────
+outputs/models/*.pkl
+outputs/models/*.joblib
+
+# ── Sensitive ────────────────────────────────────────────────────────────────
+.env
+
+# ── MLflow ────────────────────────────────────────────────────────────────────
+outputs/mlflow.db
+outputs/artifacts/
+
+# ── Hydra ────────────────────────────────────────────────────────────────────
+outputs/hydra/
+
+# ── Tools ────────────────────────────────────────────────────────────────────
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+*.log
+
 # For projects that use the Waf build system: https://waf.io/
 # Dot-hidden on Unix-like systems
 .waf-*-*/

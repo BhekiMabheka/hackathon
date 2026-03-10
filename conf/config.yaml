@@ -1,0 +1,31 @@
+# Root Hydra config — composes sub-configs
+defaults:
+  - data: banking
+  - model: lgbm
+  - training: cv
+  - _self_
+
+project:
+  name: nedbank-masters-2026
+  track: ml_ds         # ml_ds | de
+  experiment: baseline
+
+paths:
+  data_raw: data/raw
+  data_interim: data/interim
+  data_processed: data/processed
+  outputs: outputs
+  models: outputs/models
+  submissions: outputs/submissions
+  reports: outputs/reports
+
+mlflow:
+  tracking_uri: ${oc.env:MLFLOW_TRACKING_URI,sqlite:///outputs/mlflow.db}
+  experiment_name: ${oc.env:MLFLOW_EXPERIMENT_NAME,nedbank-masters-2026}
+  log_artifacts: true
+
+hydra:
+  run:
+    dir: outputs/hydra/${now:%Y-%m-%d_%H-%M-%S}
+  job:
+    chdir: false
