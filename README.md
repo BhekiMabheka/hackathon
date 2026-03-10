@@ -1,6 +1,6 @@
 # Nedbank Data & Analytics Masters 2026 — MLOps Skeleton
 
-Production-grade MLOps skeleton for the Nedbank Masters Challenge.
+Production-grade MLOps skeleton Challenge.
 Covers both the **ML/DS track** (Zindi) and the **Data Engineering track** (Otinga).
 
 ---
