@@ -15,10 +15,23 @@ data/raw/
 data/interim/
 data/processed/
 data/external/
+# ↳ Exceptions: files needed by the Streamlit Cloud dashboard
+!data/raw/loan_dataset_20000.csv
+!data/processed/train_features.parquet
+!data/processed/test_features.parquet
+!data/processed/feature_meta.json
 
 # ── Model artefacts ───────────────────────────────────────────────────────────
 outputs/models/*.pkl
 outputs/models/*.joblib
+# ↳ Exception: trained model needed by Streamlit Cloud dashboard
+!outputs/models/model.pkl
+!outputs/models/oof_predictions.parquet
+
+# ── Report artefacts (small JSON/parquet — needed by dashboard) ───────────────
+!outputs/reports/oof_metrics.json
+!outputs/reports/cv_metrics.json
+!outputs/reports/feature_importance.parquet
 
 # ── Sensitive ────────────────────────────────────────────────────────────────
 .env
